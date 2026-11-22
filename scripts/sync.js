@@ -2,26 +2,59 @@ import { readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const destination = fileURLToPath(new URL('../data/movies.json', import.meta.url));
-const api = 'https://api.github.com/repos/qun950303/jasna-ltx';
+const owner = 'qun950303';
+const repo = 'jasna-ltx';
+const branch = 'main';
+const api = `https://api.github.com/repos/${owner}/${repo}`;
+const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/data/movies.json`;
+const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'jasna-ltx-sync' };
-const metadataResponse = await fetch(`${api}/contents/data/movies.json`, {
-  headers,
-  signal: AbortSignal.timeout(60000),
-});
-if (!metadataResponse.ok) throw new Error(`Upstream lookup failed: HTTP ${metadataResponse.status}`);
-const metadata = await metadataResponse.json();
-if (!/^[0-9a-f]{40}$/.test(metadata.sha ?? '')) throw new Error('Invalid upstream file SHA');
+if (token) headers.Authorization = `Bearer ${token}`;
 
-const blobResponse = await fetch(`${api}/git/blobs/${metadata.sha}`, {
-  headers,
-  signal: AbortSignal.timeout(60000),
-});
-if (!blobResponse.ok) throw new Error(`Upstream download failed: HTTP ${blobResponse.status}`);
-const blob = await blobResponse.json();
-if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
-  throw new Error('Unexpected upstream blob encoding');
+async function fetchViaApi() {
+  const metadataResponse = await fetch(`${api}/contents/data/movies.json?ref=${branch}`, {
+    headers,
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!metadataResponse.ok) {
+    throw new Error(`Upstream lookup failed: HTTP ${metadataResponse.status}`);
+  }
+  const metadata = await metadataResponse.json();
+  if (!/^[0-9a-f]{40}$/.test(metadata.sha ?? '')) throw new Error('Invalid upstream file SHA');
+
+  const blobResponse = await fetch(`${api}/git/blobs/${metadata.sha}`, {
+    headers,
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!blobResponse.ok) {
+    throw new Error(`Upstream download failed: HTTP ${blobResponse.status}`);
+  }
+  const blob = await blobResponse.json();
+  if (blob.encoding !== 'base64' || typeof blob.content !== 'string') {
+    throw new Error('Unexpected upstream blob encoding');
+  }
+  return Buffer.from(blob.content, 'base64').toString('utf8');
 }
-const incoming = Buffer.from(blob.content, 'base64').toString('utf8');
+
+async function fetchViaRaw() {
+  const response = await fetch(rawUrl, {
+    headers: { 'User-Agent': 'jasna-ltx-sync', 'Cache-Control': 'no-cache' },
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!response.ok) {
+    throw new Error(`Upstream raw download failed: HTTP ${response.status}`);
+  }
+  return await response.text();
+}
+
+let incoming;
+try {
+  incoming = await fetchViaApi();
+} catch (error) {
+  console.log(`API route unavailable (${error.message}); falling back to raw download.`);
+  incoming = await fetchViaRaw();
+}
+
 const parsed = JSON.parse(incoming);
 if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items) || parsed.items.length === 0) {
   throw new Error('Upstream data has no nonempty items list; refusing to replace local data');

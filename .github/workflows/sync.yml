@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: '22'
       - name: Update data from upstream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/sync.js
       - name: Commit and push if changed
         run: |
