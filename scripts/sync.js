@@ -119,7 +119,12 @@ if (!primaryIsSecondary) {
 }
 
 const byCode = new Map();
-for (const it of primary.items) if (it?.code) byCode.set(it.code, it);
+for (const it of primary.items) {
+  if (!it?.code) continue;
+  // 万一回退到副源当底座，也要滤掉没有下载链接的占位条目
+  if (primaryIsSecondary && !(Array.isArray(it.links) && it.links.length > 0)) continue;
+  byCode.set(it.code, it);
+}
 
 // 之前从副源并进来的条目继续保留（防止副源临时缺条导致数量回退）
 let carried = 0;
@@ -146,8 +151,8 @@ if (secondary) {
 }
 
 const merged = { ...primary, items: [...byCode.values()], avatars };
-const stamps = [primary.updated_at, secondary?.updated_at].filter(Boolean).sort();
-if (stamps.length) merged.updated_at = stamps.at(-1);
+// 页面上的“资源更新于”只跟主源走，避免副源重扫一次就显示成“有新数据”
+if (primary.updated_at) merged.updated_at = primary.updated_at;
 
 rebuildTotals(merged);
 
